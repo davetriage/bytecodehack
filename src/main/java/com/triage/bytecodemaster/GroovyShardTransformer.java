@@ -59,7 +59,7 @@ public class GroovyShardTransformer implements ClassFileTransformer{
                    "    int blah=y+z+w            \n" +
                    "    println(\"Blah=\" + blah );                          \n " + 
                    "    //So we can prove we were here  \n" +
-                   "    com.triage.bytecodemaster.fortesting.TestFlag.specialSum=blah   \n" +
+                    "    com.triage.bytecodemaster.fortesting.TestFlag.specialSum=blah   \n" +
                    "    }\n" +
                    "}";   
    
@@ -73,6 +73,7 @@ public class GroovyShardTransformer implements ClassFileTransformer{
     
     @Override
     public byte[] transform(ClassLoader classLoader, String className, Class<?> classBeingRedefined, ProtectionDomain pd, byte[] classFileBuffer) throws IllegalClassFormatException {
+        System.err.println("Inspecting Class: " + className);
         //hard coded for now basically!
         //obviously not filtered later!
         if ( className.contains("triage")){
@@ -103,7 +104,8 @@ public class GroovyShardTransformer implements ClassFileTransformer{
     
     //just a test implementation: sharding
     protected byte[] transformClass(String tapScript, String className, ClassLoader cl, byte[] classFileBuffer) throws Exception{
-        
+        Timer timer = new Timer();
+        timer.start();
         //so that we can reference classes available in the caller when we compile the script
         
         //MAKES A KEY ASSUMPTION: that all classloaders we will have a path back to the system
@@ -111,24 +113,26 @@ public class GroovyShardTransformer implements ClassFileTransformer{
         //if this isnt the case, we may want to have a dual-parent classloader where
         //we can search both the target classloader and the system
         CachingGroovyClassLoader groovyClassLoader = new CachingGroovyClassLoader(cl);
-
+        
         //load the script in ASM
         ClassNode shimClassNode = new ClassNode();
         String scriptName = className + "-Tap.groovy";
         
-      
+        timer.mark("startParse");
         Class groovyClass = groovyClassLoader.parseClass(tapScript,scriptName);
+        timer.mark("endParse");
         
         String generatedClassName = groovyClass.getName() + ".class";
         byte[] classBytes = groovyClassLoader.getClassBytes(generatedClassName);
+        timer.mark("getClassBytes");
         ClassReader shimClassReader = new ClassReader(classBytes);
         shimClassReader.accept(shimClassNode,0); 
-        
+        timer.mark("readShimClass");
 
         ClassNode targetClassNode = new ClassNode();        
         ClassReader targetClassReader = new ClassReader(classFileBuffer);
         targetClassReader.accept(targetClassNode,0);
-              
+        timer.mark("readTargetClass");
         //copy instructions        
         //TODO: this is just a POC-- of course all this hardcoded stuff needs
         //to be replaced with real code
@@ -153,12 +157,13 @@ public class GroovyShardTransformer implements ClassFileTransformer{
             ListIterator li = instructionsToInject.iterator();
             while ( li.hasNext()){
                 AbstractInsnNode node = (AbstractInsnNode)li.next();
+                
                 if ( isReturnOpCode(node.getOpcode()) ){
                     li.remove();
                 }
             }
         }        
-
+        timer.mark("gotInstructionsToInject");
         System.out.println("Transforming Target Method:");
         printMethodNode(targetMethod);
         System.out.println("Transforming Source Method:");
@@ -166,11 +171,16 @@ public class GroovyShardTransformer implements ClassFileTransformer{
         
         //insert source instructions in target
         targetMethod.instructions.insert(sourceMethod.instructions);
+        timer.mark("injectedInstructions");
         
        //write a class 
+       
        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
        targetClassNode.accept(cw);
+       timer.mark("finishedWrite");
        System.out.println("Successfully transformed class" + className);
+       timer.stop();
+       System.out.println("Timings:"+timer);
        return cw.toByteArray();
         
     }

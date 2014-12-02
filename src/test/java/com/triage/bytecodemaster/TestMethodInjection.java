@@ -70,9 +70,9 @@ import org.objectweb.asm.util.TraceMethodVisitor;
  *     
  * @author dcowden
  */
-public class TestGroovyWeaver {
+public class TestMethodInjection extends BaseWeaverTest{
    
-   protected CachingGroovyClassLoader groovyClassLoader = new CachingGroovyClassLoader(getClass().getClassLoader());
+   
    
    //this is a pretty big deal. this trick allows classes in the byteCodeClassLoader 
    //to see those in the groovy class loader.
@@ -80,7 +80,7 @@ public class TestGroovyWeaver {
    //in the system classloader-- which means pre-compiling on startup, or defining a custom system classloader,
    //which would be frowned upon i'm sure
    
-   protected ByteCodeClassLoader byteCodeClassLoader = new ByteCodeClassLoader(getClass().getClassLoader() );
+   //protected ByteCodeClassLoader byteCodeClassLoader = new ByteCodeClassLoader(getClass().getClassLoader() );
    protected      String GROOVY_CLASS = "@groovy.transform.CompileStatic\n" +
                    "class ScriptTestClass{\n" +
                    "    String concat(String x, java.util.Date y){\n" +
@@ -97,12 +97,19 @@ public class TestGroovyWeaver {
                    "         \n" + 
                    "    }\n" +
                    "";
-   //@Test
+   
+   protected      String GROOVY_CLASS_3 = "@groovy.transform.CompileStatic\n" +
+                   "class ScriptTestClass{\n" +
+                   "    String testInjectReturn(){\n" +
+                   "         return \"HAHAHA\"\n" + 
+                   "    }\n" +
+                   "}";  
+   @Test
    public void testReadingLocalClass() throws Exception{
         //use meta class to dynamically set properties
        
         //Class groovyClass = makeGroovyScriptClass("int z=0;z=x+y");
-        ClassNode classNode = loadLocalClass("com.triage.bytecodemaster.TestClass");
+        ClassNode classNode = loadLocalClass("com.triage.bytecodemaster.fortesting.TestBaseClass");
         
         
         for (Object o: classNode.methods){
@@ -110,18 +117,18 @@ public class TestGroovyWeaver {
             System.out.println("Method Name:" + mn.name + "\t\tdesc=" + mn.desc);
         }
         
-        MethodNode mn = findMethod(classNode,"executeLogic");
+        MethodNode mn = findMethod(classNode,"getBaseStringValue");
         assertNotNull(mn);
 
    }
-   //@Test
+   @Test
    public void testDynamicGroovyClass() throws Exception{
        Class myClass = groovyClassLoader.parseClass(GROOVY_CLASS);
        GroovyObject go = (GroovyObject)myClass.newInstance();
-       assertNull(go.invokeMethod("concat", new Object[]{"foo","bar"}));
+       assertNotNull(go.invokeMethod("concat", new Object[]{"foo",new Date() }));
    }
    
-   //@Test
+   @Test
    public void testGettingByteCodeFromAGroovyClass() throws Exception {
         
         ClassNode classNode = loadGroovyTestClassAsBytecode(GROOVY_CLASS);
@@ -131,115 +138,42 @@ public class TestGroovyWeaver {
         List localVariables = runMethod.localVariables;
         
         assertTrue(runMethod.instructions.toArray().length > 0 );
-        
-        
+               
    }
    
-  
+   @Test
    public void testInjectingGroovyClassBodyIntoOtherClass()throws Exception{
        
        //get the dynamic source that has the donor body in it
-       ClassNode donorSource = loadGroovyTestClassAsBytecode(GROOVY_CLASS);
-       MethodNode donorMethod = findMethod(donorSource,"concat");
+       ClassNode donorSource = loadGroovyTestClassAsBytecode(GROOVY_CLASS_3);
+       MethodNode donorMethod = findMethod(donorSource,"testInjectReturn");
        
        
        //load the target class
-       String TARGETCLASSNAME = "com.triage.bytecodemaster.TestClass";
+       String TARGETCLASSNAME = "com.triage.bytecodemaster.fortesting.TestBaseClass";
        ClassNode targetSource = loadLocalClass(TARGETCLASSNAME);       
-       MethodNode targetMethod = findMethod(targetSource,"executeLogic");
-       System.out.println("Target Local Vars:");
-       printLocalVariables(targetMethod);
+       MethodNode targetMethod = findMethod(targetSource,"getBaseStringValue");
+       System.out.println("Target Method:");
+       printMethodNode(targetMethod);
        
        //stash the donorInto the target
-       System.out.println("Parsed Donor Class.");
-       printLocalVariables(donorMethod);
-       
-       System.out.println("Inserting These instructions in targetMethod:");
-       for ( AbstractInsnNode aa: donorMethod.instructions.toArray()){
-           System.out.println(printNode(aa));
-       }
+       System.out.println("Parsed Donor Method.");
+       printMethodNode(donorMethod);       
        
        targetMethod.instructions.insert(donorMethod.instructions);
        
        //write a class 
-       ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
-       targetSource.accept(cw);
-       byte[] classBytes = cw.toByteArray();
-       
-       //make a classloader to load it. this wouldnt be necessary in a java agent-- we
-       //just return the bytes. but this allows testing it
-       //this classloader(System) cannot refer to the new class explicitly, so we have
-       //to use reflection. but that proves the point.
-       
-       byteCodeClassLoader.addClassDef(TARGETCLASSNAME, classBytes);
-       Class c = byteCodeClassLoader.findClass(TARGETCLASSNAME);
-       
+       Class c = createClassFromClassNode(targetSource,TARGETCLASSNAME);
+              
        Object o = c.newInstance();
-       Method m = o.getClass().getDeclaredMethod("executeLogic", String.class, Date.class);
+       Method m = o.getClass().getDeclaredMethod("getBaseStringValue");      
        
-       TestPerson tc = new TestPerson("Dave");
-       assertTrue(tc.executeLogic("FoorBar", new Date() ).contains( "FoorBar")  );
-       
-       //should return FromGroovy<Date>, not 
-       String result = (String)m.invoke(o, "shouldntmatter", new Date() );
-       assertTrue(result.contains("FromGroovy"));
+       //should return HAHAHA not baseStringValue 
+       String result = (String)m.invoke(o, new Object[]{} );
+       System.out.println("getBaseStringValue Result: " + result);
+       assertTrue(result.equals("HAHAHA"));
        
    }
-   protected void printLocalVariables(MethodNode mn){       
-       for ( Object o: mn.localVariables){
-           LocalVariableNode vn =(LocalVariableNode)o;
-           System.out.println(vn.name);
-       }       
-   }
-   protected ClassNode loadLocalClass(String className) throws Exception{
-        //Class groovyClass = makeGroovyScriptClass("int z=0;z=x+y");
-        ClassNode classNode = new ClassNode();
-        
-        ClassReader classReader = new ClassReader(className);
-        classReader.accept(classNode,0);
-        return classNode;
-   }
-   
-   protected ClassNode loadGroovyTestClassAsBytecode(String classSource) throws Exception{
-        ClassNode classNode = new ClassNode();
-        String scriptName = "ScriptTestClass.groovy";
-        
-      
-        Class groovyClass = groovyClassLoader.parseClass(classSource,scriptName);
-        
-        String className = groovyClass.getName() + ".class";
-        byte[] classBytes = groovyClassLoader.getClassBytes(className);
-        ClassReader classReader = new ClassReader(classBytes);
-        classReader.accept(classNode,0);  
-        return classNode;
-   }
-   
-   protected String printNode(AbstractInsnNode insnNode ){
-        /* Create a "printer" that renders text versions of instructions */
-        Printer printer = new Textifier();
-        TraceMethodVisitor methodPrinter = new TraceMethodVisitor(printer);
 
-        /* render the instruction as a string and add it to printer's internal buffer */
-        insnNode.accept(methodPrinter);
-
-        /* convert printer's internal buffer to string and clear the buffer (so we can reuse it later) */
-        StringWriter sw = new StringWriter();
-        printer.print(new PrintWriter(sw));
-        printer.getText().clear();
-        return sw.toString();
-     
-   }
-   
-   protected MethodNode findMethod(ClassNode classNode, String name){
-       for ( Object o: classNode.methods){
-           MethodNode mn = (MethodNode)o;
-           
-           //not worrying about signatures now
-           if ( mn.name.equals(name)){
-               return mn;
-           }
-       }
-       return null;
-   }
    
 }
