@@ -217,8 +217,8 @@ public class CharSequenceCompiler<T> {
             final Class<T> newClass = loadClass(qualifiedClassName);
             
             //get the bytes
-            JavaFileObjectImpl jfo = (JavaFileObjectImpl)sources.get(qualifiedClassName);
-            compiled.put(qualifiedClassName, new CompileResult(newClass, jfo.getByteCode() ));
+            
+            compiled.put(qualifiedClassName, new CompileResult(newClass, classLoader.getByteCode(qualifiedClassName) ));
          }
          return compiled;
       } catch (ClassNotFoundException e) {
@@ -587,6 +587,11 @@ final class ClassLoaderImpl extends ClassLoader {
       return super.loadClass(name, resolve);
    }
 
+   public byte[] getByteCode(String qualifiedClassName){
+       JavaFileObjectImpl jfo = (JavaFileObjectImpl)classes.get(qualifiedClassName);
+       return jfo.getByteCode();
+   }
+   
    @Override
    public InputStream getResourceAsStream(final String name) {
       if (name.endsWith(".class")) {

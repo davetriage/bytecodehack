@@ -28,6 +28,7 @@ public class TestJavaCompiler {
         String TEST_SOURCE = "public class TestClass{" + "\n" +
                 "   public String testMethod(){" + "\n" +
                 "         return \"HAHAHA\"; " + "\n" +
+                "   }"   + "\n" +
                 "}" + "\n"; 
                
         CharSequenceCompiler compiler = new CharSequenceCompiler(getClass().getClassLoader(),new ArrayList<String>() );
@@ -39,6 +40,7 @@ public class TestJavaCompiler {
             Map<String,CompileResult> resultMap = compiler.compile(source, diagnostics);
             CompileResult testClassResult = resultMap.get("TestClass");
             Class testClass = testClassResult.getCreatedClass();
+            
             byte [] testByteCode = testClassResult.getByteCode();
 
             Object o = testClass.newInstance();
@@ -55,9 +57,11 @@ public class TestJavaCompiler {
             
         }
         catch ( CharSequenceCompilerException e ){
-            for ( Diagnostic d : diagnostics.getDiagnostics()){
-                System.out.println(d.toString());
-                diagnostics.report(d);
+            System.err.println("Errors Compiling: ");
+            DiagnosticCollector<JavaFileObject> dc = e.getDiagnostics();
+            
+            for ( Diagnostic d :dc.getDiagnostics()){
+                System.err.println(d.toString());                
             }
             throw e;
         }
